@@ -1,0 +1,295 @@
+import sqlite3
+import tkinter
+import re
+
+cnt = sqlite3.connect("myshop.db")
+
+try:
+    cnt.execute('ALTER TABLE users ADD COLUMN fail_count INTEGER DEFAULT 0')
+except:
+    pass
+
+try:
+    cnt.execute('ALTER TABLE users ADD COLUMN last_fail TEXT')
+except:
+    pass
+
+cnt.execute('''CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    address TEXT,
+    grade INTEGER
+)''')
+
+cnt.execute('''CREATE TABLE IF NOT EXISTS products (
+    id INTEGER PRIMARY KEY,
+    pname VARCHAR(35) NOT NULL,
+    numbers INTEGER NOT NULL,
+    price INTEGER NOT NULL,
+    eDate VARCHAR(25)
+)''')
+
+cnt.execute('''CREATE TABLE IF NOT EXISTS cart (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL,
+    Pname TEXT NOT NULL,
+    Pnumbers INTEGER NOT NULL,
+    Pprice INTEGER NOT NULL
+)''')
+
+
+
+
+result = cnt.execute("SELECT COUNT(*) FROM products")
+data = result.fetchall()
+
+if len(data) == 0:
+    cnt.execute('''INSERT INTO products (pname, numbers, price, eDate) VALUES 
+        ("LG TV 2012", 100, 1000, "2024-12-31"),
+        ("Samsung monitor 1015", 10, 300, "2023-10-15"),
+        ("iPhone 2020", 18, 450, "2025-01-01"),
+        ("Creative speaker 2025", 80, 200, "2025-06-30"),
+        ("Vivobook 2018", 5, 400, "2023-12-01")
+    ''')
+    cnt.commit()
+
+# -------------function ------------------
+def login():
+    global current_user
+    user = txtUser.get()
+    pas = txtPass.get()
+
+    result = cnt.execute(f'''SELECT fail_count, last_fail FROM users WHERE username="{user}"''')
+    data_all = result.fetchall()
+    if len(data_all) > 0:
+        data = data_all[0]
+    else:
+        data = None
+
+    if data:
+        fail_count, last_fail = data
+
+        if fail_count >= 3:
+            lblMsg.configure(text="اکانت شما به دلیل 3 تلاش ناموفق به مدت یک هفته مسدود شده است", fg="red")
+            return
+    else:
+        lblMsg.configure(text="نام کاربری یافت نشد", fg="red")
+        return
+
+    result = cnt.execute(f'''SELECT * FROM users WHERE username="{user}" AND password="{pas}" ''')
+    data = result.fetchall()
+
+    if len(data) < 1:
+        lblMsg.configure(text="نام کاربری یا رمز عبور اشتباه است", fg="red")
+        cnt.execute(f'''
+            UPDATE users
+            SET fail_count = fail_count + 1,
+            last_fail = date('now')
+            WHERE username="{user}"
+        ''')
+        cnt.commit()
+        return
+    else:
+        lblMsg.configure(text="به حساب کاربری خوش آمدید!", fg="green")
+        txtUser.delete(0, "end")
+        txtPass.delete(0, "end")
+        btnLogin.configure(state="disabled")
+        btnShop.configure(state="active")
+
+        cnt.execute(f'''
+            UPDATE users
+            SET fail_count = 0
+            WHERE username="{user}"
+        ''')
+        cnt.commit()
+        current_user = user
+
+def signup():
+    def saveSignup(user, pas, addr):
+        sql = f'''INSERT INTO users (username,password,address,grade) VALUES("{user}","{pas}","{addr}",0)'''
+        try:
+            cnt.execute(sql)
+            cnt.commit()
+            return True
+        except:
+            return False
+
+    def submitVal(user, pas, cpas):
+        if user == "" or pas == "" or cpas == "":
+            return False, "empty fields error!"
+
+        if pas != cpas:
+            return False, "password and confirm mismatch!"
+
+        sql = f"SELECT * FROM users WHERE username='{user}'"
+        result = cnt.execute(sql)
+        data = result.fetchall()
+
+        if len(data) > 0:
+            return False, "username already exists!"
+
+        pattern = r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$"
+        if not re.match(pattern, pas):
+            return False, "invalid password!"
+        return True, ""
+def submit():
+        user = txtUser.get()
+        pas = txtPass.get()
+        Cpas = txtcpas.get()
+        addr = txtAddr.get()
+        result, msg = submitVal(user, pas, Cpas)
+        if not result:
+            lblMsg.configure(text=msg, fg="red")
+            return
+        result = saveSignup(user, pas, addr)
+        if not result:
+            lblMsg.configure(text="something went wrong while connecting to database", fg="red")
+        else:
+            lblMsg.configure(text="signup done successfully!", fg="green")
+            txtUser.delete(0, "end")
+            txtPass.delete(0, "end")
+            txtcpas.delete(0, "end")
+            txtAddr.delete(0, "end")
+
+    winSignup = tkinter.Toplevel(win)
+    winSignup.title("Signup")
+    winSignup.geometry("300x300")
+
+    lblUser = tkinter.Label(winSignup, text="Username: ")
+    lblUser.pack()
+    txtUser = tkinter.Entry(winSignup, width=18)
+    txtUser.pack()
+
+    lblPass = tkinter.Label(winSignup, text="Password: ")
+    lblPass.pack()
+    txtPass = tkinter.Entry(winSignup, width=18)
+    txtPass.pack()
+
+    lblcpas = tkinter.Label(winSignup, text="Password Confirm: ")
+    lblcpas.pack()
+    txtcpas = tkinter.Entry(winSignup, width=18)
+    txtcpas.pack()
+
+    lblAddr = tkinter.Label(winSignup, text="Address: ")
+    lblAddr.pack()
+    txtAddr = tkinter.Entry(winSignup, width=18)
+    txtAddr.pack()
+
+    lblMsg = tkinter.Label(winSignup, text="")
+    lblMsg.pack()
+    btnsubmit = tkinter.Button(winSignup, text="Submit!", width=18, command=submit)
+    btnsubmit.pack()
+
+
+def getAllProducts():
+    sql = 'SELECT * FROM products'
+    result = cnt.execute(sql)
+    data = result.fetchall()
+    return data
+
+
+def Shop():
+    def buyProduct():
+        username = current_user
+        Pid = txtid.get()
+        Pnumber = txtnum.get()
+
+        if Pid == "" or Pnumber == "":
+            lblMsg3.config(text="لطفاً تمام فیلدها را پر کنید", fg="red")
+            return
+
+        try:
+            Pid = int(Pid)
+            Pnumber = int(Pnumber)
+        except:
+            lblMsg3.config(text="مقدار عددی وارد کنید", fg="red")
+            return
+
+        sql = f'''SELECT * FROM products WHERE id="{Pid}"'''
+        result = cnt.execute(sql)
+        data = result.fetchall()
+
+        if len(data) == 0:
+            lblMsg3.config(text="محصول پیدا نشد", fg="red")
+            return
+
+        Pname = data[0][1]
+        current_stock = data[0][2]
+        Pprice = data[0][3]
+
+        if Pnumber > current_stock:
+            lblMsg3.config(text=f"موجودی کافی نیست. موجودی فعلی: {current_stock}", fg="red")
+            return
+
+        sql = f'''
+            INSERT INTO cart (username,Pname,Pnumbers,Pprice)
+            VALUES("{username}","{Pname}","{Pnumber}","{Pprice}")
+        '''
+        cnt.execute(sql)
+        new_stock = current_stock - Pnumber
+        sql = f"UPDATE products SET numbers={new_stock} WHERE id={Pid}"
+        cnt.execute(sql)
+        try:
+            cnt.commit()
+            lblMsg3.config(text="خرید ثبت شد", fg="green")
+
+            lstbox.delete(0, "end")
+            new_products = getAllProducts()
+            for p in new_products:
+                lstbox.insert("end", f" id:{p[0]} - pname:{p[1]} - pnumber:{p[2]} - price:{p[3]} - edate:{p[4]}")
+        except:
+            lblMsg3.config(text="خطا در ثبت خرید", fg="red")
+
+    winShop = tkinter.Toplevel(win)
+    winShop.title("Shop panel")
+    winShop.geometry("350x350")
+    lstbox = tkinter.Listbox(winShop, width=50)
+    lstbox.pack(pady=5)
+
+    products = getAllProducts()
+    for p in products:
+        lstbox.insert("end", f" id:{p[0]} - pname:{p[1]} - pnumber:{p[2]} - price:{p[3]} - edate:{p[4]}")
+
+    lblid = tkinter.Label(winShop, text='product id:')
+    lblid.pack()
+    txtid = tkinter.Entry(winShop)
+    txtid.pack()
+
+    lblnum = tkinter.Label(winShop, text='product numbers:')
+    lblnum.pack()
+    txtnum = tkinter.Entry(winShop)
+    txtnum.pack()
+
+    lblMsg3 = tkinter.Label(winShop, text='')
+    lblMsg3.pack()
+    btnbuy = tkinter.Button(winShop, text="BUY!", width=20, command=buyProduct)
+    btnbuy.pack()
+#------------main-------------
+win = tkinter.Tk()
+win.title('Shop Project')
+win.geometry('300x300')
+
+lblUser = tkinter.Label(win, text="Username: ")
+lblUser.pack()
+txtUser = tkinter.Entry(win, width=18)
+txtUser.pack()
+
+lblPass = tkinter.Label(win, text="Password: ")
+lblPass.pack()
+txtPass = tkinter.Entry(win, width=18)
+txtPass.pack()
+
+lblMsg = tkinter.Label(win, text=" ")
+lblMsg.pack()
+
+btnLogin = tkinter.Button(win, text="Login", width=18, command=login)
+btnLogin.pack()
+
+btnSignup = tkinter.Button(win, text="Signup", width=18, command=signup)
+btnSignup.pack()
+
+btnShop = tkinter.Button(win, text="Shop now!", width=18, state="disabled", command=Shop)
+btnShop.pack()
+
+win.mainloop()
